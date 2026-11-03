@@ -124,9 +124,10 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const TH=[0,100,200,300],LV=[['Aman','emerald'],['SP1','yellow'],['SP2','orange'],['SP3','red']];
 const lvl=p=>p>=300?3:p>=200?2:p>=100?1:0;
 const TODAY=new Date().toLocaleDateString('sv-SE');
+const _m=new Date().getMonth()+1,_y=new Date().getFullYear(),TA=_m>=7?`${_y}/${_y+1}`:`${_y-1}/${_y}`;
 const dt=t=>new Date(t).toLocaleString('id-ID',{dateStyle:'short',timeStyle:'short'});
-const MENU={Admin:['dashboard','users','santri','alumni','peraturan','pelanggaran','absensi','rekap','logs'],Keamanan:['dashboard','santri','peraturan','pelanggaran','absensi','rekap'],Pengurus:['absensi','rekap'],Pengasuh:['dashboard','santri','peraturan','pelanggaran'],'Wali Santri':['dashboard','pelanggaran']};
-const LBL={dashboard:['chart-pie','Dashboard'],users:['user-shield','Pengguna'],santri:['users','Data Santri'],alumni:['user-graduate','Alumni'],peraturan:['gavel','Peraturan'],pelanggaran:['clipboard-list','Pelanggaran'],absensi:['qrcode','Absensi'],rekap:['calendar-check','Rekap Absensi'],logs:['history','Log Akses']};
+const MENU={Admin:['dashboard','users','santri','alumni','peraturan','pelanggaran','sp','izin','absensi','rekap','logs'],Keamanan:['dashboard','santri','peraturan','pelanggaran','sp','izin','absensi','rekap'],Pengurus:['izin','absensi','rekap'],Pengasuh:['dashboard','santri','peraturan','pelanggaran','sp','izin'],'Wali Santri':['dashboard','pelanggaran','sp']};
+const LBL={dashboard:['chart-pie','Dashboard'],users:['user-shield','Pengguna'],santri:['users','Data Santri'],alumni:['user-graduate','Alumni'],peraturan:['gavel','Peraturan'],pelanggaran:['clipboard-list','Pelanggaran'],sp:['file-lines','Surat Peringatan'],izin:['right-left','Perizinan'],absensi:['qrcode','Absensi'],rekap:['calendar-check','Rekap Absensi'],logs:['history','Log Akses']};
 const ERR={'auth/invalid-credential':'Email atau password salah','auth/email-already-in-use':'Email sudah terdaftar','auth/weak-password':'Password minimal 6 karakter'};
 const toast=(t,i='success')=>Swal.fire({toast:true,position:'top',title:t,icon:i,timer:2200,showConfirmButton:false});
 const dlg=(title,html,pre)=>Swal.fire({title,html,showCancelButton:true,confirmButtonText:'Simpan',cancelButtonText:'Batal',focusConfirm:false,preConfirm:pre});
@@ -136,8 +137,8 @@ const bar=(t,b='')=>`<div class="flex flex-wrap items-center justify-between gap
 const badge=p=>{const[l,c]=LV[lvl(p)];return `<span class="font-bold text-${c}-400">${p}<span class="text-slate-500 font-normal">/300</span></span> <span class="text-[10px] px-1.5 rounded border border-${c}-500/40 bg-${c}-500/20 text-${c}-400">${l}</span>`};
 const tbl=(h,b)=>`<div class="card overflow-x-auto"><table class="tb"><thead><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${b}</tbody></table></div>`;
 
-let U,view,unsubs=[],reg=false,qr,lastScan=0,ch=[];
-const S={rekap:[],bulan:TODAY.slice(0,7),users:[],santri:[],alumni:[],peraturan:[],pelanggaran:[],absensi:[],logs:[],q:''};
+let U,view,unsubs=[],reg=false,qr,lastScan=0,ch=[],unAbs=null,sesiSig='';
+const S={spF:{lv:'',st:''},izin:[],sesi:[],sp:[],sesiId:'',rekap:[],bulan:TODAY.slice(0,7),users:[],santri:[],alumni:[],peraturan:[],pelanggaran:[],absensi:[],logs:[],q:''};
 const isStaff=()=>U.role==='Admin'||U.role==='Keamanan';
 
 // ================= AUTH =================
@@ -168,7 +169,7 @@ async function boot(u){
   $('#nav').innerHTML=MENU[U.role].map(m=>`<a class="nav" data-a="go" data-id="${m}"><i class="fas fa-${LBL[m][0]} w-5"></i>${LBL[m][1]}</a>`).join('');
   show('app');listen();go(MENU[U.role][0]);log('Login');
 }
-function stop(){unsubs.forEach(f=>f());unsubs=[];U=null}
+function stop(){unsubs.forEach(f=>f());unsubs=[];unAbs?.();unAbs=null;U=null}
 const log=a=>U&&addDoc(collection(db,'logs'),{uid:U.uid,email:U.email,role:U.role,aksi:a,createdAt:Date.now()}).catch(()=>{});
 
 // ================= DATA (realtime, sesuai role) =================
@@ -179,10 +180,14 @@ function listen(){
   if(r==='Wali Santri'){
     if(!U.childId)return;
     unsubs.push(onSnapshot(doc(db,'santri',U.childId),d=>{S.santri=d.exists()?[{id:d.id,...d.data()}]:[];paint()}));
-    L('pelanggaran',query(c('pelanggaran'),where('santriId','==',U.childId)));return}
+    L('pelanggaran',query(c('pelanggaran'),where('santriId','==',U.childId)));L('sp',query(c('sp'),where('santriId','==',U.childId)));return}
   L('santri',c('santri'));if(r==='Admin'||r==='Keamanan'||r==='Pengasuh')L('alumni',c('alumni'));
   if(r!=='Pengurus')L('pelanggaran',query(c('pelanggaran'),orderBy('createdAt','desc'),limit(300)));
-  if(r==='Admin'||r==='Keamanan'||r==='Pengurus')L('absensi',query(c('absensi'),where('tanggal','==',TODAY)));
+  if(['Admin','Keamanan','Pengurus'].includes(r))unsubs.push(onSnapshot(query(c('sesi'),orderBy('createdAt','desc'),limit(30)),s=>{S.sesi=s.docs.map(d=>({id:d.id,...d.data()}));
+    if(!S.sesi.some(x=>x.id===S.sesiId)){S.sesiId=(S.sesi.find(x=>x.status==='Buka')||S.sesi[0])?.id||'';watchAbs()}
+    const sg=S.sesi.map(x=>x.id+x.status).join(),f=sg!==sesiSig;sesiSig=sg;paint(f)},e=>console.error('sesi',e.code)));
+  L('izin',query(c('izin'),where('tahunAjaran','==',TA)));
+  if(['Admin','Keamanan','Pengasuh'].includes(r))L('sp',c('sp'));
   if(r==='Admin'){L('users',c('users'));L('logs',query(c('logs'),orderBy('createdAt','desc'),limit(150)))}
 }
 
@@ -196,6 +201,7 @@ function go(v){
 }
 function paint(force){
   if(!U||!view)return;
+  if(view==='izin'&&!force&&$('#izt')){$('#izt').innerHTML=izinRows();$('#izc').innerHTML=izinCards();return}
   if(view==='absensi'&&!force&&$('#abs')){$('#abs').innerHTML=absRows();$('#abs-sum').textContent=absSum();return}
   const hadQ=document.activeElement?.id==='q';
   $('#content').innerHTML=V[view]();
@@ -209,7 +215,7 @@ dashboard(){
   const pm=S.pelanggaran.filter(p=>new Date(p.createdAt).toLocaleDateString('sv-SE').startsWith(TODAY.slice(0,7))).length,hadir=S.absensi.filter(a=>a.status==='Hadir').length,ab=isStaff();
   const K=(i,l,v,k)=>`<div class="card p-4 flex items-center gap-3"><div class="w-11 h-11 shrink-0 rounded-xl bg-${k}-500/15 text-${k}-400 flex items-center justify-center text-lg"><i class="fas fa-${i}"></i></div><div class="min-w-0"><p class="text-xs text-slate-400 truncate">${l}</p><p class="text-2xl font-bold text-white leading-tight">${v}</p></div></div>`;
   const rec=S.pelanggaran.slice().sort((a,b)=>b.createdAt-a.createdAt).slice(0,5);
-  return `<div class="grid grid-cols-2 xl:grid-cols-4 gap-3">${K('users','Santri Aktif',s.length,'emerald')}${K('user-graduate','Santri Lulus / Nonaktif',S.alumni.length,'violet')}${K('id-card','Kartu Santri Aktif',s.length,'sky')}${K('id-card-clip','Kartu Santri Nonaktif',S.alumni.length,'slate')}${K('clipboard-list','Total Pelanggaran',S.totalPel??S.pelanggaran.length,'orange')}${K('calendar-day','Pelanggaran Bulan Ini',pm,'yellow')}${K('circle-check','Hadir Hari Ini',ab?hadir:'-','emerald')}${K('shield-halved','Santri Aman',c[0],'emerald')}</div>
+  return `<div class="grid grid-cols-2 xl:grid-cols-4 gap-3">${K('users','Santri Aktif',s.length,'emerald')}${K('user-graduate','Santri Lulus / Nonaktif',S.alumni.length,'violet')}${K('id-card','Kartu Santri Aktif',s.length,'sky')}${K('id-card-clip','Kartu Santri Nonaktif',S.alumni.length,'slate')}${K('clipboard-list','Total Pelanggaran',S.totalPel??S.pelanggaran.length,'orange')}${K('calendar-day','Pelanggaran Bulan Ini',pm,'yellow')}${K('circle-check','Hadir (Sesi Dipilih)',ab?hadir:'-','emerald')}${K('shield-halved','Santri Aman',c[0],'emerald')}${K('house-user','Izin Pulang (di luar)',S.izin.filter(i=>!i.kembaliAt&&i.jenis==='pulang').length,'sky')}${K('person-walking-arrow-right','Izin Keluar/Kegiatan (di luar)',S.izin.filter(i=>!i.kembaliAt&&i.jenis!=='pulang').length,'violet')}${K('clock','Terlambat Kembali',S.izin.filter(i=>!i.kembaliAt&&Date.now()>i.sampai).length,'red')}${K('file-signature','SP Menunggu Terbit',S.sp.filter(x=>x.status==='draf').length,'yellow')}</div>
   <div class="grid grid-cols-3 gap-3 mt-3">${[1,2,3].map(n=>`<div class="card p-4 text-center"><p class="text-xs text-slate-400">SP ${n}</p><p class="text-2xl font-bold text-${LV[n][1]}-400">${c[n]}</p></div>`).join('')}</div>
   <div class="grid lg:grid-cols-2 gap-4 mt-4"><div class="card p-4 h-64"><canvas id="c1"></canvas></div><div class="card p-4 h-64"><canvas id="c2"></canvas></div></div>
   <div class="grid lg:grid-cols-2 gap-4 mt-4"><div><h4 class="font-semibold text-white mb-2">Poin Tertinggi</h4>${tbl(['Santri','Kelas','Poin'],rows(s.slice().sort((a,b)=>(b.poin||0)-(a.poin||0)).slice(0,5),x=>`<tr><td>${esc(x.nama)}</td><td>${esc(x.kelas)}</td><td>${badge(x.poin||0)}</td></tr>`,3))}</div>
@@ -237,24 +243,53 @@ pelanggaran(){
   const st=isStaff(),ad=U.role==='Admin',ST=['Dicatat','Dibina','Dipanggil','Selesai'];
   return bar('Catatan Pelanggaran',st?'<button class="btn bg-red-600" data-a="newV">+ Catat Kasus</button>':'')+tbl(['Kejadian','Santri','Pelanggaran','Poin','Status',''],rows(S.pelanggaran.slice().sort((a,b)=>(b.kejadian||b.createdAt)-(a.kejadian||a.createdAt)),p=>{
     const s=S.santri.find(x=>x.id===p.santriId),k=KC[p.kategori]||'slate';
-    return `<tr><td>${dt(p.kejadian||p.createdAt)}</td><td>${esc(p.nama)}<p class="text-[10px] text-slate-500">${esc(p.santriId)}</p></td><td class="whitespace-normal min-w-[200px]">${esc(p.pasal)} ${p.kategori?`<span class="text-[10px] px-1.5 rounded border border-${k}-500/40 text-${k}-400">${esc(p.kategori)}</span>`:''}<p class="text-xs text-slate-400">${p.tempat?'Lokasi: '+esc(p.tempat)+'. ':''}${esc(p.catatan||'')} <span class="text-slate-500">Dicatat: ${esc(p.oleh||'-')}</span></p></td><td class="text-red-400 font-bold">+${p.poin}</td><td>${st?`<select class="inp !w-auto !py-1" data-st="${esc(p.id)}">${opts(ST,x=>`<option ${x===(p.status||'Dicatat')?'selected':''}>${x}</option>`)}</select>`:esc(p.status||'Dicatat')}</td><td class="text-right">${st&&s&&s.poin>=100?`<button class="btn" data-a="sp" data-id="${esc(s.id)}"><i class="fas fa-file-pdf"></i> SP${lvl(s.poin)}</button>`:''}${ad?` <button class="btn" data-a="delV" data-id="${esc(p.id)}"><i class="fas fa-trash text-red-400"></i></button>`:''}</td></tr>`},6))},
+    return `<tr><td>${dt(p.kejadian||p.createdAt)}</td><td>${esc(p.nama)}<p class="text-[10px] text-slate-500">${esc(p.santriId)}</p></td><td class="whitespace-normal min-w-[200px]">${esc(p.pasal)} ${p.kategori?`<span class="text-[10px] px-1.5 rounded border border-${k}-500/40 text-${k}-400">${esc(p.kategori)}</span>`:''}<p class="text-xs text-slate-400">${p.tempat?'Lokasi: '+esc(p.tempat)+'. ':''}${esc(p.catatan||'')} <span class="text-slate-500">Dicatat: ${esc(p.oleh||'-')}</span></p></td><td class="text-red-400 font-bold">+${p.poin}</td><td>${st?`<select class="inp !w-auto !py-1" data-st="${esc(p.id)}">${opts(ST,x=>`<option ${x===(p.status||'Dicatat')?'selected':''}>${x}</option>`)}</select>`:esc(p.status||'Dicatat')}</td><td class="text-right">${st&&s&&s.poin>=100?`<button class="btn" data-a="go" data-id="sp"><i class="fas fa-file-pdf"></i> SP${lvl(s.poin)}</button>`:''}${ad?` <button class="btn" data-a="delV" data-id="${esc(p.id)}"><i class="fas fa-trash text-red-400"></i></button>`:''}</td></tr>`},6))},
 absensi(){
-  return bar('Absensi Barcode - '+new Date().toLocaleDateString('id-ID',{dateStyle:'long'}))+`<div class="grid md:grid-cols-3 gap-4">
-  <div class="card p-4 space-y-3"><div id="reader" class="bg-black rounded-lg overflow-hidden"></div>
-    <div class="flex gap-2"><button class="btn flex-1" data-a="scanStart">Mulai Kamera</button><button class="btn flex-1" data-a="scanStop">Stop</button></div>
-    <select id="st" class="inp"><option>Hadir</option><option>Izin</option><option>Sakit</option><option>Alpa</option></select>
-    <div class="flex gap-2"><input id="mid" class="inp" placeholder="ID santri, mis. S-001"><button class="btn" data-a="manual"><i class="fas fa-check"></i></button></div></div>
-  <div class="card p-4 md:col-span-2"><p id="abs-sum" class="text-xs text-slate-400 mb-2">${absSum()}</p><div class="overflow-auto max-h-[420px]"><table class="tb"><thead><tr><th>Jam</th><th>Santri</th><th>Status</th></tr></thead><tbody id="abs">${absRows()}</tbody></table></div></div></div>`},
+  const se=S.sesi.find(x=>x.id===S.sesiId),op=se?.status==='Buka';
+  return bar('Sesi Absensi',`<select id="ssel" class="inp !w-auto !py-1.5">${opts(S.sesi,x=>`<option value="${esc(x.id)}" ${x.id===S.sesiId?'selected':''}>${esc(x.nama)} - ${esc(x.tanggal)} ${esc(x.jam)} (${esc(x.status)})</option>`)||'<option>Belum ada sesi</option>'}</select><button class="btn bg-blue-600" data-a="newSesi">+ Buka Sesi</button>${op?'<button class="btn text-red-400" data-a="tutupSesi">Tutup Sesi</button>':''}`)+
+  `<div class="grid md:grid-cols-3 gap-4"><div class="card p-4 space-y-3"><div id="reader" class="bg-black rounded-lg overflow-hidden"></div><div class="flex gap-2"><button class="btn flex-1" data-a="scanStart">Mulai Kamera</button><button class="btn flex-1" data-a="scanStop">Stop</button></div><div class="flex gap-2"><input id="mid" class="inp" placeholder="ID santri / scan kartu"><button class="btn" data-a="manual"><i class="fas fa-check"></i></button></div><p class="text-[11px] text-slate-400">${se?(op?'Sesi terbuka: scan kartu atau ketik ID, foto santri muncul.':'Sesi sudah ditutup.'):'Buka sesi terlebih dahulu.'}</p></div>
+  <div class="card p-4 md:col-span-2"><p id="abs-sum" class="text-xs text-slate-400 mb-2">${absSum()}</p><div class="overflow-auto max-h-[420px]"><table class="tb"><thead><tr><th>Jam</th><th>Santri</th><th>Status</th><th></th></tr></thead><tbody id="abs">${absRows()}</tbody></table></div></div></div>`},
+izin(){const can=['Admin','Keamanan','Pengurus'].includes(U.role);
+  return bar('Perizinan Santri - TA '+TA,can?'<button class="btn bg-blue-600" data-a="newI">+ Catat Izin</button>':'')+`<div id="izc" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">${izinCards()}</div>`+(can?`<div class="card p-4 mb-4 grid md:grid-cols-3 gap-4"><div class="space-y-3"><div id="reader" class="bg-black rounded-lg overflow-hidden"></div><div class="flex gap-2"><button class="btn flex-1" data-a="scanStart">Mulai Kamera</button><button class="btn flex-1" data-a="scanStop">Stop</button></div><div class="flex gap-2"><input id="mid" class="inp" placeholder="ID santri / scan kartu"><button class="btn" data-a="manual"><i class="fas fa-check"></i></button></div></div><p class="md:col-span-2 text-xs text-slate-400">Scan kartu atau ketik ID. Jika santri tercatat sedang di luar, sistem mencatat KEMBALI; jika tidak, formulir izin terbuka. Kuota: pulang 5x per tahun ajaran, kegiatan 2x per bulan (wajib surat izin resmi lembaga). Izin keluar dibatasi sesuai batas kembali yang dicatat.</p></div>`:'')+`<div class="card overflow-x-auto"><table class="tb"><thead><tr><th>Santri</th><th>Jenis</th><th>Pergi</th><th>Batas kembali</th><th>Kembali</th><th>Status</th><th></th></tr></thead><tbody id="izt">${izinRows()}</tbody></table></div>`},
+sp(){
+  const ad=U.role==='Admin',st=isStaff(),wl=U.role==='Wali Santri',NX={draf:'Terbitkan',terbit:'Tandai diterima wali',diterima:'Tandai selesai'},CL={draf:'yellow',terbit:'sky',diterima:'violet',selesai:'emerald'},TT=['','Peringatan','Panggilan Orang Tua','Skorsing / Dikeluarkan'];
+  const all=wl?S.sp.filter(x=>x.status!=='draf'):S.sp,list=all.filter(x=>(!S.spF.lv||String(x.level)===S.spF.lv)&&(!S.spF.st||x.status===S.spF.st)),n=k=>all.filter(x=>x.status===k).length;
+  const K=(l,v,k)=>`<div class="card p-4"><p class="text-xs text-slate-400">${l}</p><p class="text-2xl font-bold text-${k}-400">${v}</p></div>`;
+  const F=(f,label,o)=>`<select class="inp !w-auto !py-1.5" data-f="${f}"><option value="">${label}</option>${o.map(([v,l])=>`<option value="${v}" ${S.spF[f]===v?'selected':''}>${l}</option>`).join('')}</select>`;
+  return bar('Data Surat Peringatan (SP)',(st?'<button class="btn" data-a="spSync">Buat draf santri lama</button><button class="btn" data-a="spExpAll"><i class="fas fa-file-export"></i> Export Semua</button>':'')+F('lv','Semua tingkat',[['1','SP1'],['2','SP2'],['3','SP3']])+F('st','Semua status',[['draf','Draf'],['terbit','Terbit'],['diterima','Diterima wali'],['selesai','Selesai']]))+
+  `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">${K('Draf',n('draf'),'yellow')}${K('Terbit',n('terbit'),'sky')}${K('Diterima wali',n('diterima'),'violet')}${K('Selesai',n('selesai'),'emerald')}</div>`+
+  tbl(['Santri','Tingkat','Poin','Status','Terbit','Catatan',''],rows(list.slice().sort((a,b)=>b.createdAt-a.createdAt),x=>`<tr><td>${esc(x.nama)}<p class="text-[10px] text-slate-500">${esc(x.santriId)}</p></td><td>SP${x.level} <span class="text-xs text-slate-400">${TT[x.level]}</span></td><td>${x.poin}</td><td><span class="text-xs px-2 py-0.5 rounded-full border border-${CL[x.status]}-500/40 text-${CL[x.status]}-400 uppercase">${esc(x.status)}</span></td><td>${x.tglTerbit?dt(x.tglTerbit):'-'}</td><td class="whitespace-normal max-w-[200px] text-xs text-slate-400">${esc(x.catatan||'')}</td><td class="text-right"><button class="btn" data-a="spLihat" data-id="${esc(x.id)}">Lihat</button>${st?` <button class="btn" data-a="spExp" data-id="${esc(x.id)}"><i class="fas fa-file-excel"></i></button>`:''}${ad&&NX[x.status]?` <button class="btn text-emerald-400" data-a="spNext" data-id="${esc(x.id)}">${NX[x.status]}</button>`:''}</td></tr>`,7))},
 rekap(){return bar('Rekap Absensi Bulanan',`<input id="bln" type="month" class="inp !w-auto !py-1" value="${S.bulan}"><button class="btn" data-a="expR"><i class="fas fa-file-export"></i> Export</button>`)+tbl(['Santri','Kelas','Hadir','Izin','Sakit','Alpa'],rows(rekapData(),({s,c})=>`<tr><td>${esc(s.nama)} <span class="text-xs text-slate-500">${esc(s.id)}</span></td><td>${esc(s.kelas)}</td><td class="text-emerald-400">${c.Hadir}</td><td>${c.Izin}</td><td>${c.Sakit}</td><td class="text-red-400">${c.Alpa}</td></tr>`,6))},
 logs(){return bar('Log Aktivitas')+tbl(['Waktu','Pengguna','Peran','Aktivitas'],rows(S.logs,l=>`<tr><td>${dt(l.createdAt)}</td><td>${esc(l.email)}</td><td class="text-blue-400">${esc(l.role)}</td><td>${esc(l.aksi)}</td></tr>`,4))}
 };
 const santriRows=()=>{const q=S.q.toLowerCase(),st=isStaff(),ad=U.role==='Admin';
   return rows(S.santri.filter(s=>s.nama.toLowerCase().includes(q)||s.id.toLowerCase().includes(q)),s=>`<tr><td><p class="text-white">${esc(s.nama)}</p><p class="text-[10px] text-slate-400">${esc(s.id)}</p></td><td>${esc(s.kelas)} / ${esc(s.kamar)}</td><td>${badge(s.poin||0)}</td><td class="text-right">${st?`<button class="btn" data-a="editS" data-id="${esc(s.id)}"><i class="fas fa-pen"></i></button> <button class="btn" data-a="card" data-id="${esc(s.id)}"><i class="fas fa-id-card"></i></button>`:''}${ad?` <button class="btn" data-a="grad" data-id="${esc(s.id)}"><i class="fas fa-user-graduate text-emerald-400"></i></button>`:''}</td></tr>`,4)};
-const absRows=()=>rows(S.absensi.slice().sort((a,b)=>b.createdAt-a.createdAt),a=>`<tr><td>${esc(a.jam)}</td><td>${esc(a.nama)} <span class="text-xs text-slate-500">${esc(a.kode)}</span></td><td>${esc(a.status)}</td></tr>`,3);
-const absSum=()=>['Hadir','Izin','Sakit','Alpa'].map(k=>`${k}: ${S.absensi.filter(a=>a.status===k).length}`).join('  |  ');
+const jenisL={pulang:'Izin Pulang',kegiatan:'Izin Kegiatan',keluar:'Izin Keluar'},nowLocal=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,16);
+const absRows=()=>rows(S.absensi.slice().sort((a,b)=>b.createdAt-a.createdAt),a=>`<tr><td>${esc(a.jam)}</td><td>${esc(a.nama)} <span class="text-xs text-slate-500">${esc(a.kode)}</span></td><td class="${a.status==='Hadir'?'text-emerald-400':a.status==='Alpa'?'text-red-400':'text-yellow-400'}">${esc(a.status)}${a.koreksi?` <span class="text-[10px] text-slate-500" title="${esc(a.koreksi)}">(dikoreksi)</span>`:''}</td><td class="text-right">${U.role==='Admin'?`<button class="btn" data-a="korAbs" data-id="${esc(a.id)}"><i class="fas fa-pen"></i></button>`:''}</td></tr>`,4);
+const absSum=()=>{const n=k=>S.absensi.filter(a=>a.status===k).length,iz=S.absensi.filter(a=>String(a.status).startsWith('Izin')).length;return `Hadir ${n('Hadir')} | Izin ${iz} | Sakit ${n('Sakit')} | Alpa ${n('Alpa')} | Belum tercatat ${Math.max(0,S.santri.length-S.absensi.length)}`};
+const izinStat=i=>i.kembaliAt?'Selesai':Date.now()>i.sampai?'Terlambat':'Di luar';
+const izinCards=()=>{const out=S.izin.filter(i=>!i.kembaliAt),K=(l,v,k)=>`<div class="card p-4"><p class="text-xs text-slate-400">${l}</p><p class="text-2xl font-bold text-${k}-400">${v}</p></div>`;
+  return K('Sedang di luar',out.length,'sky')+K('Terlambat kembali',out.filter(i=>Date.now()>i.sampai).length,'red')+K('Izin pulang TA ini',S.izin.filter(i=>i.jenis==='pulang').length,'emerald')+K('Total izin TA ini',S.izin.length,'violet')};
+const izinRows=()=>{const can=['Admin','Keamanan','Pengurus'].includes(U.role),CL={Selesai:'emerald',Terlambat:'red','Di luar':'sky'};
+  return rows(S.izin.slice().sort((a,b)=>(a.kembaliAt?1:0)-(b.kembaliAt?1:0)||b.mulai-a.mulai),i=>{const st=izinStat(i),c=CL[st];
+    return `<tr><td>${esc(i.nama)}<p class="text-[10px] text-slate-500">${esc(i.santriId)}</p></td><td>${jenisL[i.jenis]}<p class="text-xs text-slate-400 whitespace-normal max-w-[220px]">${esc(i.kegiatan||i.alasan||'')}</p></td><td>${dt(i.mulai)}</td><td>${dt(i.sampai)}</td><td>${i.kembaliAt?dt(i.kembaliAt):'-'}</td><td><span class="text-xs px-2 py-0.5 rounded-full border border-${c}-500/40 text-${c}-400">${st}</span></td><td class="text-right">${i.adaSurat?`<button class="btn" data-a="lihatDok" data-id="izin_${esc(i.id)}">Surat</button> `:''}${!i.kembaliAt&&can?`<button class="btn text-emerald-400" data-a="kembali" data-id="${esc(i.id)}">Catat kembali</button>`:''}</td></tr>`},7)};
+async function izinScan(kode){const s=S.santri.find(x=>x.id===kode);if(!s)return toast('ID tidak terdaftar','error');
+  const a=S.izin.find(i=>i.santriId===kode&&!i.kembaliAt);
+  if(a){const ph=await foto(kode),r=await Swal.fire({title:s.nama,text:`Tercatat di luar (${jenisL[a.jenis]}). Catat KEMBALI sekarang?`,imageUrl:ph||undefined,imageWidth:140,showCancelButton:true,confirmButtonText:'Catat kembali',cancelButtonText:'Batal'});if(r.isConfirmed)A.kembali({id:a.id});return}
+  A.newI({kode})}
+function watchAbs(){unAbs?.();unAbs=null;if(!S.sesiId){S.absensi=[];return}unAbs=onSnapshot(query(collection(db,'absensi'),where('sesiId','==',S.sesiId)),s=>{S.absensi=s.docs.map(d=>({id:d.id,...d.data()}));paint()},e=>console.error('absensi',e.code))}
+async function absen(kode){
+  const se=S.sesi.find(x=>x.id===S.sesiId);if(!se||se.status!=='Buka')return toast('Buka atau pilih sesi yang masih terbuka','error');
+  const s=S.santri.find(x=>x.id===kode);if(!s)return toast('ID tidak terdaftar','error');
+  if(S.absensi.some(a=>a.kode===kode))return toast(s.nama+' sudah tercatat','info');
+  const n=new Date(),ph=await foto(kode),iz=S.izin.find(i=>i.santriId===kode&&!i.kembaliAt);
+  try{await setDoc(doc(db,'absensi',S.sesiId+'_'+kode),{kode,nama:s.nama,status:'Hadir',tanggal:se.tanggal,sesiId:S.sesiId,jam:n.toTimeString().slice(0,5),createdAt:Date.now()});
+    Swal.fire({imageUrl:ph||undefined,imageWidth:180,title:s.nama,html:`<b>${esc(s.kelas)} / ${esc(s.kamar)}</b><br>HADIR${iz?`<br><span style="color:#facc15">Catatan: tercatat ${jenisL[iz.jenis]} dan belum kembali</span>`:''}`,timer:iz?3500:1800,showConfirmButton:false})}
+  catch{toast('Gagal mencatat absensi','error')}}
+function spText(x){return ['',`Santri telah mencapai ${x.poin} poin (batas SP I: 100 poin). Santri diberi PERINGATAN untuk memperbaiki kedisiplinan dan tidak mengulangi pelanggaran. Apabila poin mencapai 200, santri akan dikenakan SP II.`,`Santri telah mencapai ${x.poin} poin (batas SP II: 200 poin). ORANG TUA / WALI santri DIPANGGIL untuk menghadap pihak keamanan pondok guna pembinaan. Apabila poin mencapai 300, santri akan dikenakan SP III.`,`Santri telah mencapai ${x.poin} poin (batas SP III: 300 poin). Santri dikenakan sanksi SKORSING / DIKELUARKAN dari pondok sesuai tata tertib, dan WAJIB SOWAN kepada Pengasuh bersama orang tua / wali.`][x.level]}
 const KC={Ringan:'sky',Sedang:'yellow',Berat:'red'};
 const FOTO=new Map(),foto=async k=>{if(FOTO.has(k))return FOTO.get(k);try{const d=await getDoc(doc(db,'foto',k));FOTO.set(k,d.exists()?d.data().data:'')}catch{FOTO.set(k,'')}return FOTO.get(k)};
-const compress=f=>new Promise((ok,no)=>{const i=new Image();i.onload=()=>{const m=Math.min(1,360/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=i.width*m;c.height=i.height*m;c.getContext('2d').drawImage(i,0,0,c.width,c.height);ok(c.toDataURL('image/jpeg',.72))};i.onerror=no;i.src=URL.createObjectURL(f)});
+const compress=(f,mx=360,q=.72)=>new Promise((ok,no)=>{const i=new Image();i.onload=()=>{const m=Math.min(1,mx/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=i.width*m;c.height=i.height*m;c.getContext('2d').drawImage(i,0,0,c.width,c.height);ok(c.toDataURL('image/jpeg',q))};i.onerror=no;i.src=URL.createObjectURL(f)});
 const CK=`.kt{width:85.6mm;height:54mm;border-radius:3mm;overflow:hidden;background:linear-gradient(135deg,#065f46,#0f766e 55%,#5b21b6);color:#fff;font-family:Inter,Arial,sans-serif;position:relative;break-inside:avoid;margin:2mm;text-align:left}.kh{padding:2mm 3mm;background:rgba(0,0,0,.25);display:flex;flex-direction:column;line-height:1.2}.kh b{font-size:11pt;letter-spacing:1px}.kh span{font-size:6pt;letter-spacing:.5px;color:#a7f3d0}.kb{display:flex;gap:3mm;padding:2.5mm 3mm}.kp{width:20mm;height:26mm;background:#fff;border-radius:1.5mm;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:7pt}.kp img{width:100%;height:100%;object-fit:cover}.ki{display:flex;flex-direction:column;gap:.8mm;min-width:0}.ki b{font-size:9pt;line-height:1.15}.ki small{font-size:6.5pt;color:#d1fae5}.kc{position:absolute;right:3mm;bottom:2mm;background:#fff;padding:1mm 1.5mm;border-radius:1mm}.kc svg{height:9mm;width:34mm}`;
 function cardHTML(s,ph){const sv=document.createElementNS('http://www.w3.org/2000/svg','svg');JsBarcode(sv,s.id,{format:'CODE128',width:1.6,height:34,fontSize:10,margin:0});
   return `<div class="kt"><div class="kh"><b>KEAMANAN PONDOK</b><span>PESANTREN AL ISHLAH MANGKANG</span></div><div class="kb"><div class="kp">${ph?`<img src="${ph}">`:'FOTO'}</div><div class="ki"><b>${esc(s.nama)}</b><small>ID: ${esc(s.id)}</small><small>${esc(s.tempatLahir||'-')}, ${esc(s.tglLahir||'-')}</small><small>Kelas ${esc(s.kelas)} - Kamar ${esc(s.kamar)}</small></div></div><div class="kc">${sv.outerHTML}</div></div>`}
@@ -271,7 +306,8 @@ function formS(id){const s=S.santri.find(x=>x.id===id)||{},F=(i,l,v='',ty='text'
     id?await updateDoc(doc(db,'santri',k),d):await setDoc(doc(db,'santri',k),{...d,poin:0,createdAt:Date.now()});
     const f=$('#fph').files[0];if(f){const data=await compress(f);await setDoc(doc(db,'foto',k),{data,updatedAt:Date.now()});FOTO.set(k,data)}
     log((id?'Ubah':'Tambah')+' santri '+n);toast('Tersimpan')})}
-const xlsx=(rows,name,sheet)=>{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),sheet);XLSX.writeFile(wb,name)};
+const xlsx=(rows,name,sheet)=>{const ws=XLSX.utils.json_to_sheet(rows),K=Object.keys(rows[0]||{});ws['!cols']=K.map(k=>({wch:Math.min(45,Math.max(k.length,...rows.map(x=>String(x[k]??'').length))+2)}));const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,sheet);XLSX.writeFile(wb,name)};
+const xaoa=(rows,name,sheet,cols,merges)=>{const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=cols.map(w=>({wch:w}));ws['!merges']=merges;const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,sheet);XLSX.writeFile(wb,name)};
 const sRow=s=>({ID:s.id,Nama:s.nama,'Tempat Lahir':s.tempatLahir||'','Tanggal Lahir':s.tglLahir||'','Jenis Kelamin':s.jk||'','Tahun Masuk':s.tahunMasuk||'',Kelas:s.kelas,Kamar:s.kamar,Alamat:s.alamat||'','Nama Ayah':s.ayah||'','Nama Ibu/Wali':s.ibu||'','No HP Wali':s.telpWali||'',Poin:s.poin||0});
 function waliDash(){
   const s=S.santri[0];if(!s)return '<p class="card p-4 text-yellow-400 text-sm">Akun Anda belum dihubungkan dengan santri. Hubungi Admin.</p>';
@@ -331,30 +367,73 @@ newV(){if(!S.santri.length||!S.peraturan.length)return Swal.fire('Data kosong','
   dlg('Catat Pelanggaran',`<div class="space-y-2 text-left"><select id="f1" class="inp">${opts(S.santri,s=>`<option value="${esc(s.id)}">${esc(s.nama)} (${esc(s.id)})</option>`)}</select><select id="f2" class="inp">${opts(S.peraturan,p=>`<option value="${esc(p.id)}">[${esc(p.kategori||'-')}] ${esc(p.kode)} - ${esc(p.pasal)} (+${p.bobot})</option>`)}</select><input id="f4" type="datetime-local" class="inp" value="${now}"><input id="f5" class="inp" placeholder="Lokasi kejadian"><input id="f3" class="inp" placeholder="Catatan (opsional)"></div>`,async()=>{
   const s=S.santri.find(x=>x.id===val('f1')),p=S.peraturan.find(x=>x.id===val('f2')),b=writeBatch(db),old=s.poin||0,nw=old+p.bobot;
   b.set(doc(collection(db,'pelanggaran')),{santriId:s.id,nama:s.nama,peraturanId:p.id,pasal:p.pasal,kategori:p.kategori||'',poin:p.bobot,tempat:val('f5'),catatan:val('f3'),kejadian:new Date(val('f4')).getTime()||Date.now(),status:'Dicatat',oleh:U.name,createdAt:Date.now()});
-  b.update(doc(db,'santri',s.id),{poin:increment(p.bobot)});await b.commit();
+  b.update(doc(db,'santri',s.id),{poin:increment(p.bobot)});for(let n=lvl(old)+1;n<=lvl(nw);n++){const sid=`${s.id}_SP${n}`;if(!S.sp.some(x=>x.id===sid))b.set(doc(db,'sp',sid),{santriId:s.id,nama:s.nama,level:n,poin:nw,status:'draf',oleh:U.name,createdAt:Date.now()})}await b.commit();
   log(`Pelanggaran ${s.id} +${p.bobot}`);
-  lvl(nw)>lvl(old)?setTimeout(()=>Swal.fire('Naik ke '+LV[lvl(nw)][0],`${s.nama} kini ${nw} poin. Segera terbitkan surat peringatan.`,'warning'),300):toast('Pelanggaran dicatat')})},
+  lvl(nw)>lvl(old)?setTimeout(()=>Swal.fire('Naik ke '+LV[lvl(nw)][0],`${s.nama} kini ${nw} poin. Draf surat peringatan dibuat di menu Surat Peringatan, menunggu persetujuan Admin.`,'warning'),300):toast('Pelanggaran dicatat')})},
 async delV({id}){const v=S.pelanggaran.find(x=>x.id===id);
   const r=await Swal.fire({title:'Hapus catatan?',text:'Poin santri akan dikurangi kembali.',icon:'warning',showCancelButton:true});if(!r.isConfirmed)return;
   const b=writeBatch(db);b.delete(doc(db,'pelanggaran',id));if(S.santri.some(s=>s.id===v.santriId))b.update(doc(db,'santri',v.santriId),{poin:increment(-v.poin)});
   await b.commit();log(`Hapus pelanggaran ${v.santriId} -${v.poin}`);toast('Dihapus')},
-sp({id}){const s=S.santri.find(x=>x.id===id),n=lvl(s.poin),d=new window.jspdf.jsPDF();
-  d.setFont('helvetica','bold');d.setFontSize(16);d.text('PONDOK PESANTREN AL ISHLAH',105,18,{align:'center'});
-  d.setFont('helvetica','normal');d.setFontSize(10);d.text('Mangkang, Kota Semarang, Jawa Tengah',105,24,{align:'center'});d.line(20,28,190,28);
-  d.setFont('helvetica','bold');d.setFontSize(12);d.text('SURAT PERINGATAN '+n,105,38,{align:'center'});d.setFont('helvetica','normal');d.setFontSize(10);
-  d.text('Diberitahukan bahwa santri berikut:',20,48);
-  d.autoTable({startY:52,margin:{left:20},theme:'plain',styles:{fontSize:10,cellPadding:1},columnStyles:{0:{cellWidth:35},1:{cellWidth:5}},body:[['Nama',':',s.nama],['ID',':',s.id],['Kelas / Kamar',':',s.kelas+' / '+s.kamar],['Total poin',':',String(s.poin)]]});
-  const M=['','Mohon memperbaiki kedisiplinan.','Wali santri diharap menghadap pihak keamanan pondok.','Santri dikembalikan kepada orang tua/wali sesuai tata tertib.'];
-  d.text(d.splitTextToSize(`Telah mencapai batas poin SP${n} (${TH[n]} poin). ${M[n]}`,170),20,d.lastAutoTable.finalY+8);
-  d.autoTable({startY:d.lastAutoTable.finalY+24,head:[['Tanggal','Pelanggaran','Poin']],body:S.pelanggaran.filter(p=>p.santriId===id).map(p=>[dt(p.createdAt),p.pasal,'+'+p.poin]),styles:{fontSize:9}});
-  const y=d.lastAutoTable.finalY+14;d.text('Semarang, '+new Date().toLocaleDateString('id-ID',{dateStyle:'long'}),130,y);d.text('Bagian Keamanan',130,y+7);d.text('(____________________)',130,y+30);
-  d.save(`SP${n}_${s.nama.replace(/\s+/g,'_')}.pdf`);log(`Cetak SP${n} ${s.nama}`)},
-
+async newSesi(){dlg('Buka Sesi Absensi',`<div class="space-y-2 text-left"><input id="f1" class="inp" placeholder="Nama kegiatan, mis. Jamaah Subuh"><label class="block text-left text-[11px] text-slate-400">Tanggal<input id="f2" type="date" class="inp mt-0.5" value="${TODAY}"></label><label class="block text-left text-[11px] text-slate-400">Jam<input id="f3" type="time" class="inp mt-0.5" value="${new Date().toTimeString().slice(0,5)}"></label></div>`,async()=>{
+  const n=val('f1');if(!n)return Swal.showValidationMessage('Nama kegiatan wajib diisi');
+  const x=await addDoc(collection(db,'sesi'),{nama:n,tanggal:val('f2')||TODAY,jam:val('f3'),status:'Buka',dibuatOleh:U.name,createdAt:Date.now()});S.sesiId=x.id;watchAbs();paint(true);log('Buka sesi: '+n);toast('Sesi dibuka')})},
+async tutupSesi(){const se=S.sesi.find(x=>x.id===S.sesiId);if(!se)return;
+  const done=new Set(S.absensi.map(a=>a.kode)),ts=new Date(se.tanggal+'T'+se.jam).getTime(),izOf=k=>S.izin.find(i=>i.santriId===k&&i.mulai<=ts&&(!i.kembaliAt||ts<=i.kembaliAt));
+  const miss=S.santri.filter(s=>!done.has(s.id)),auto=miss.filter(s=>izOf(s.id)),rest=miss.filter(s=>!izOf(s.id));
+  const R=await Swal.fire({title:'Tutup sesi?',width:600,showCancelButton:true,confirmButtonText:'Tutup sesi',cancelButtonText:'Batal',html:`<p class="text-sm">${done.size} hadir, ${auto.length} izin otomatis, ${rest.length} belum hadir.</p><p class="text-xs text-slate-400 mt-1">Centang yang SAKIT. Yang tidak dicentang dicatat ALPA.</p><div class="text-left max-h-64 overflow-auto mt-2">${rest.map(s=>`<label class="flex items-center gap-2 py-1 text-sm"><input type="checkbox" class="sk" value="${esc(s.id)}"> ${esc(s.nama)} <span class="text-xs text-slate-500">${esc(s.kelas)}</span></label>`).join('')||'<p class="text-xs text-slate-400">Semua santri sudah tercatat.</p>'}</div>`,preConfirm:()=>[...document.querySelectorAll('.sk:checked')].map(x=>x.value)});
+  if(!R.isConfirmed)return;
+  const sakit=new Set(R.value),jam=new Date().toTimeString().slice(0,5),ops=miss.map(s=>{const iz=izOf(s.id);return [doc(db,'absensi',se.id+'_'+s.id),{kode:s.id,nama:s.nama,status:iz?jenisL[iz.jenis]:sakit.has(s.id)?'Sakit':'Alpa',tanggal:se.tanggal,sesiId:se.id,jam,otomatis:true,createdAt:Date.now()}]});
+  for(let i=0;i<ops.length;i+=400){const b=writeBatch(db);ops.slice(i,i+400).forEach(([ref,d])=>b.set(ref,d));await b.commit()}
+  await updateDoc(doc(db,'sesi',se.id),{status:'Tutup',ditutupAt:Date.now(),ditutupOleh:U.name});log(`Tutup sesi ${se.nama}: ${sakit.size} sakit, ${rest.length-sakit.size} alpa, ${auto.length} izin`);toast('Sesi ditutup')},
+newI(d={}){const k=d.kode||'',L=(l,h)=>`<label class="block text-left text-[11px] text-slate-400">${l}${h}</label>`;
+  dlg('Catat Izin Santri',`<div class="space-y-2 text-left"><select id="f1" class="inp">${opts(S.santri,s=>`<option value="${esc(s.id)}" ${s.id===k?'selected':''}>${esc(s.nama)} (${esc(s.id)})</option>`)}</select><select id="f2" class="inp"><option value="pulang">Izin Pulang</option><option value="kegiatan">Izin Kegiatan</option><option value="keluar">Izin Keluar</option></select>${L('Pergi','<input id="f3" type="datetime-local" class="inp mt-0.5" value="'+nowLocal()+'">')}${L('Batas kembali','<input id="f4" type="datetime-local" class="inp mt-0.5">')}<input id="f5" class="inp" placeholder="Alasan / keperluan"><input id="f6" class="inp" placeholder="Nama kegiatan dan lembaga (izin kegiatan)">${L('Surat izin resmi lembaga (wajib untuk izin kegiatan)','<input id="f7" type="file" accept="image/*" class="inp mt-0.5">')}<input id="f8" class="inp" placeholder="Alasan melebihi kuota (khusus Admin, jika kuota habis)"></div>`,async()=>{
+  const s=S.santri.find(x=>x.id===val('f1')),j=val('f2'),mulai=new Date(val('f3')).getTime(),sampai=new Date(val('f4')).getTime(),f=$('#f7').files[0];
+  if(!s)return Swal.showValidationMessage('Pilih santri');
+  if(!(sampai>mulai))return Swal.showValidationMessage('Isi batas kembali setelah waktu pergi');
+  if(!val('f5'))return Swal.showValidationMessage('Alasan wajib diisi');
+  if(j==='kegiatan'&&(!val('f6')||!f))return Swal.showValidationMessage('Izin kegiatan wajib nama kegiatan dan surat izin resmi');
+  if(S.izin.some(x=>x.santriId===s.id&&!x.kembaliAt))return Swal.showValidationMessage('Santri ini masih tercatat di luar');
+  const mine=S.izin.filter(x=>x.santriId===s.id),bln=new Date(mulai).toLocaleDateString('sv-SE').slice(0,7);
+  const over=j==='pulang'?mine.filter(x=>x.jenis==='pulang').length>=5:j==='kegiatan'?mine.filter(x=>x.jenis==='kegiatan'&&new Date(x.mulai).toLocaleDateString('sv-SE').slice(0,7)===bln).length>=2:false;
+  if(over){if(U.role!=='Admin')return Swal.showValidationMessage('Kuota habis ('+(j==='pulang'?'pulang 5x per tahun ajaran':'kegiatan 2x per bulan')+'). Hubungi Admin.');if(!val('f8'))return Swal.showValidationMessage('Kuota habis. Isi alasan melebihi kuota (Admin).')}
+  const ref=doc(collection(db,'izin'));
+  if(f)await setDoc(doc(db,'dokumen','izin_'+ref.id),{data:await compress(f,1100,.6),updatedAt:Date.now()});
+  await setDoc(ref,{santriId:s.id,nama:s.nama,jenis:j,mulai,sampai,alasan:val('f5'),kegiatan:val('f6'),adaSurat:!!f,override:over?val('f8'):'',tahunAjaran:TA,dicatatOleh:U.name,createdAt:Date.now()});
+  log(`Izin ${j}: ${s.nama}${over?' (melebihi kuota: '+val('f8')+')':''}`);toast('Izin tercatat')})},
+async kembali({id}){const i=S.izin.find(x=>x.id===id),st=izinStat(i);await updateDoc(doc(db,'izin',id),{kembaliAt:Date.now(),status:'Selesai'});log(`Kembali: ${i.nama} (${st})`);toast(i.nama+' tercatat kembali')},
+async lihatDok({id}){const d=await getDoc(doc(db,'dokumen',id));if(!d.exists())return toast('Dokumen tidak ditemukan','error');Swal.fire({imageUrl:d.data().data,imageAlt:'Dokumen',width:700,showCloseButton:true,showConfirmButton:false})},
+async spNext({id}){const x=S.sp.find(y=>y.id===id),nx={draf:'terbit',terbit:'diterima',diterima:'selesai'}[x.status];if(!nx)return;const d={status:nx};
+  if(nx==='terbit'){const r=await Swal.fire({title:'Terbitkan SP'+x.level+'?',text:x.nama,icon:'question',showCancelButton:true,confirmButtonText:'Terbitkan'});if(!r.isConfirmed)return;d.tglTerbit=Date.now();d.diterbitkanOleh=U.name}
+  if(nx==='selesai'){const r=await Swal.fire({title:'Tandai selesai',input:'text',inputPlaceholder:x.level===3?'Catatan sowan ke Pengasuh':'Catatan tindak lanjut',showCancelButton:true});if(r.isDismissed)return;d.catatan=r.value||''}
+  await updateDoc(doc(db,'sp',id),d);log(`SP${x.level} ${x.nama}: ${nx}`);toast('Status SP diperbarui')},
+spLihat({id}){const x=S.sp.find(y=>y.id===id),s=S.santri.find(z=>z.id===x.santriId)||{nama:x.nama,id:x.santriId,kelas:'-',kamar:'-'},st=isStaff();
+  const H=S.pelanggaran.filter(p=>p.santriId===x.santriId).sort((a,b)=>(a.kejadian||a.createdAt)-(b.kejadian||b.createdAt));
+  Swal.fire({title:`SP${x.level} - ${esc(s.nama)}`,width:720,showCancelButton:st,confirmButtonText:st?'Export Excel':'Tutup',cancelButtonText:'Tutup',html:`<div class="text-left text-sm space-y-1"><p><b>ID:</b> ${esc(s.id)} | <b>Kelas/Kamar:</b> ${esc(s.kelas)} / ${esc(s.kamar)}</p><p><b>Poin:</b> ${x.poin} / 300 | <b>Status:</b> ${esc(x.status)}${x.tglTerbit?' | <b>Terbit:</b> '+dt(x.tglTerbit):''}</p><p class="text-slate-300">${esc(spText(x))}</p>${x.catatan?`<p><b>Catatan:</b> ${esc(x.catatan)}</p>`:''}</div><div class="mt-3 max-h-60 overflow-auto text-left"><table class="tb"><thead><tr><th>Tanggal</th><th>Pelanggaran</th><th>Poin</th></tr></thead><tbody>${H.map(p=>`<tr><td>${dt(p.kejadian||p.createdAt)}</td><td class="whitespace-normal">${esc(p.pasal)}</td><td>+${p.poin}</td></tr>`).join('')}</tbody></table></div>`}).then(q=>{if(q.isConfirmed&&st)A.spExp({id})})},
+spExp({id}){const x=S.sp.find(y=>y.id===id),s=S.santri.find(z=>z.id===x.santriId)||{nama:x.nama,id:x.santriId,kelas:'-',kamar:'-'},n=x.level,tg=new Date(x.tglTerbit||Date.now()),R=[],M=[];
+  const full=t=>{M.push({s:{r:R.length,c:0},e:{r:R.length,c:4}});R.push([t])};
+  const wrap=(t,k=95)=>{const o=[];let l='';String(t).split(' ').forEach(w=>{if((l+' '+w).length>k){o.push(l);l=w}else l=l?l+' '+w:w});if(l)o.push(l);return o};
+  full('PONDOK PESANTREN AL ISHLAH');full('Bagian Keamanan - Mangkang, Kota Semarang, Jawa Tengah');R.push([]);full('SURAT PERINGATAN '+['','I','II','III'][n]);full(`Nomor: ${String(x.createdAt).slice(-6)}/SP-${n}/KEAMANAN/${tg.getFullYear()}`);R.push([]);
+  [['Nama',s.nama],['ID Santri',s.id],['Tempat, tgl lahir',`${s.tempatLahir||'-'}, ${s.tglLahir||'-'}`],['Kelas / Kamar',`${s.kelas} / ${s.kamar}`],['Total poin',`${x.poin} / 300`],['Status SP',x.status],['Catatan',x.catatan||'-']].forEach(([a,b])=>R.push([a,':',b]));
+  R.push([]);wrap(spText(x)).forEach(l=>full(l));R.push([]);full('RIWAYAT PELANGGARAN');R.push(['Tanggal','Kategori','Pelanggaran','Lokasi','Poin']);
+  S.pelanggaran.filter(p=>p.santriId===x.santriId).sort((a,b)=>(a.kejadian||a.createdAt)-(b.kejadian||b.createdAt)).forEach(p=>R.push([dt(p.kejadian||p.createdAt),p.kategori||'',p.pasal,p.tempat||'',p.poin]));
+  R.push([],['','','','','Semarang, '+tg.toLocaleDateString('id-ID',{dateStyle:'long'})],['Bagian Keamanan','','Pengasuh','',n>1?'Orang tua / wali':'Santri'],[],[],['(__________)','','(__________)','','(__________)']);
+  xaoa(R,`SP${n}_${String(s.nama).replace(/\s+/g,'_')}.xlsx`,'SP'+n,[22,14,38,20,18],M);log(`Export SP${n} ${s.nama}`)},
+spExpAll(){const rows=S.sp.slice().sort((a,b)=>a.createdAt-b.createdAt).map((x,i)=>{const s=S.santri.find(z=>z.id===x.santriId)||{};return {No:i+1,Tingkat:'SP'+x.level,Status:x.status,'Tgl Terbit':x.tglTerbit?dt(x.tglTerbit):'',ID:x.santriId,Nama:x.nama,Kelas:s.kelas||'',Kamar:s.kamar||'',Poin:x.poin,Catatan:x.catatan||''}});
+  if(!rows.length)return toast('Belum ada data SP','info');xlsx(rows,'Data_SP_Al_Ishlah.xlsx','SP');log('Export semua SP')},
+async spSync(){const add=[];S.santri.forEach(s=>{for(let n=1;n<=lvl(s.poin||0);n++){const id=`${s.id}_SP${n}`;if(!S.sp.some(x=>x.id===id))add.push([id,s,n])}});
+  if(!add.length)return Swal.fire('Sudah lengkap','Semua santri yang melewati batas sudah punya draf SP.','info');
+  const q=await Swal.fire({title:'Buat draf SP?',text:`${add.length} draf SP akan dibuat untuk santri yang poinnya sudah melewati batas. Admin tetap perlu menerbitkannya.`,icon:'question',showCancelButton:true,confirmButtonText:'Buat draf'});if(!q.isConfirmed)return;
+  for(let i=0;i<add.length;i+=400){const b=writeBatch(db);add.slice(i,i+400).forEach(([id,s,n])=>b.set(doc(db,'sp',id),{santriId:s.id,nama:s.nama,level:n,poin:s.poin,status:'draf',oleh:U.name,createdAt:Date.now()}));await b.commit()}
+  log(`Buat ${add.length} draf SP santri lama`);toast(add.length+' draf dibuat')},
+korAbs({id}){const a=S.absensi.find(x=>x.id===id);if(U.role!=='Admin'||!a)return;
+  dlg('Koreksi Status Absensi',`<div class="space-y-2 text-left"><p class="text-sm">${esc(a.nama)} - saat ini: <b>${esc(a.status)}</b></p><select id="f1" class="inp">${opts(['Hadir','Izin Pulang','Izin Kegiatan','Izin Keluar','Sakit','Alpa'],x=>`<option ${x===a.status?'selected':''}>${x}</option>`)}</select><input id="f2" class="inp" placeholder="Alasan koreksi (wajib)"></div>`,async()=>{
+    const st=val('f1'),al=val('f2');if(!al)return Swal.showValidationMessage('Alasan wajib diisi');if(st===a.status)return Swal.showValidationMessage('Status belum diubah');
+    await updateDoc(doc(db,'absensi',id),{status:st,koreksi:al,dikoreksiOleh:U.name,dikoreksiAt:Date.now()});log(`Koreksi absensi ${a.nama}: ${a.status} -> ${st} (${al})`);toast('Status dikoreksi')})},
 // --- absensi ---
 async scanStart(){try{qr??=new Html5Qrcode('reader');if(qr.isScanning)return;
-  await qr.start({facingMode:'environment'},{fps:10,qrbox:{width:250,height:100}},t=>{if(Date.now()-lastScan>2500){lastScan=Date.now();absen(t.trim().toUpperCase())}},()=>{})}catch{toast('Kamera tidak dapat dibuka','error')}},
+  await qr.start({facingMode:'environment'},{fps:10,qrbox:{width:250,height:100}},t=>{if(Date.now()-lastScan>2500){lastScan=Date.now();(view==='izin'?izinScan:absen)(t.trim().toUpperCase())}},()=>{})}catch{toast('Kamera tidak dapat dibuka','error')}},
 scanStop(){scanStop()},
-manual(){const i=$('#mid');if(i.value.trim()){absen(i.value.trim().toUpperCase());i.value=''}},
+manual(){const i=$('#mid');if(i.value.trim()){(view==='izin'?izinScan:absen)(i.value.trim().toUpperCase());i.value=''}},
 
 // --- pengguna ---
 async approve({id}){const u=S.users.find(x=>x.id===id),role=document.getElementById('r-'+id).value,k=String(u.anakDiminta||'').toUpperCase(),d={status:'approved',role};if(role==='Wali Santri'&&S.santri.some(s=>s.id===k))d.childId=k;await updateDoc(doc(db,'users',id),d);log('Setujui user '+id);toast('Disetujui')},
@@ -364,23 +443,15 @@ async linkW({id}){const r=await Swal.fire({title:'Hubungkan ke ID Santri',input:
   await updateDoc(doc(db,'users',id),{childId:k});log(`Hubungkan wali ${id} ke ${k}`);toast('Terhubung')}
 };
 function scanStop(){if(qr?.isScanning)qr.stop().catch(()=>{})}
-function rekapData(){const c={};S.rekap.forEach(a=>{(c[a.kode]??={Hadir:0,Izin:0,Sakit:0,Alpa:0})[a.status]++});
+function rekapData(){const c={};S.rekap.forEach(a=>{(c[a.kode]??={Hadir:0,Izin:0,Sakit:0,Alpa:0})[String(a.status).startsWith('Izin')?'Izin':a.status]++});
   return S.santri.slice().sort((a,b)=>(a.kelas+a.nama).localeCompare(b.kelas+b.nama)).map(s=>({s,c:c[s.id]||{Hadir:0,Izin:0,Sakit:0,Alpa:0}}))}
 async function loadCount(){try{S.totalPel=(await getCountFromServer(collection(db,'pelanggaran'))).data().count;paint()}catch{}}
 async function loadRekap(){const b=S.bulan;
   try{S.rekap=(await getDocs(query(collection(db,'absensi'),where('tanggal','>=',b+'-01'),where('tanggal','<=',b+'-31')))).docs.map(d=>d.data())}catch{S.rekap=[];toast('Gagal memuat rekap','error')}
   paint(true)}
-async function absen(kode){
-  const s=S.santri.find(x=>x.id===kode);if(!s)return toast('ID tidak terdaftar','error');
-  if(S.absensi.some(a=>a.kode===kode))return toast(s.nama+' sudah tercatat hari ini','info');
-  const n=new Date();
-  try{await setDoc(doc(db,'absensi',TODAY+'_'+kode),{kode,nama:s.nama,status:$('#st')?.value||'Hadir',tanggal:TODAY,jam:n.toTimeString().slice(0,5),createdAt:Date.now()});toast(s.nama+' - tercatat')}
-  catch{toast('Gagal mencatat absensi','error')}
-}
-
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-a]');if(!b)return;e.preventDefault();
   try{await A[b.dataset.a]?.(b.dataset)}catch(x){toast(x.message,'error')}});
-document.addEventListener('change',async e=>{const sx=e.target.closest('[data-st]');if(sx){try{await updateDoc(doc(db,'pelanggaran',sx.dataset.st),{status:sx.value});log('Status pelanggaran: '+sx.value);toast('Status diperbarui')}catch(x){toast(x.message,'error')}return}if(e.target.id==='bln'&&e.target.value){S.bulan=e.target.value;return loadRekap()}const s=e.target.closest('[data-c]');if(!s)return;
+document.addEventListener('change',async e=>{const fl=e.target.closest('[data-f]');if(fl){S.spF[fl.dataset.f]=fl.value;paint();return}if(e.target.id==='ssel'){S.sesiId=e.target.value;watchAbs();paint(true);return}const sx=e.target.closest('[data-st]');if(sx){try{await updateDoc(doc(db,'pelanggaran',sx.dataset.st),{status:sx.value});log('Status pelanggaran: '+sx.value);toast('Status diperbarui')}catch(x){toast(x.message,'error')}return}if(e.target.id==='bln'&&e.target.value){S.bulan=e.target.value;return loadRekap()}const s=e.target.closest('[data-c]');if(!s)return;
   try{await updateDoc(doc(db,'users',s.dataset.c),{role:s.value});log(`Ubah peran ${s.dataset.c} ke ${s.value}`);toast('Peran diubah')}catch(x){toast(x.message,'error')}});
 document.addEventListener('input',e=>{if(e.target.id==='q'){S.q=e.target.value;$('#sr').innerHTML=santriRows()}});
 
