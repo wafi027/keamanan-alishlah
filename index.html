@@ -64,7 +64,7 @@ select.inp option{background:#0f2e3d}
       <input id="rWa" type="tel" required class="inp" placeholder="Nomor WhatsApp, mis. 081234567890">
       <select id="rRole" required class="inp"><option value="">Daftar sebagai...</option><option>Pengasuh</option><option>Pengurus</option><option>Keamanan</option><option>Wali Santri</option></select>
       <div id="rAnak" class="hidden"><input id="rKid" class="inp" placeholder="ID santri (anak), tertera di kartu santri"><p class="text-[11px] text-slate-400 mt-1">Admin memverifikasi data ini sebelum akun dihubungkan dengan santri.</p></div>
-      <input id="rPass" type="password" minlength="6" required class="inp" placeholder="Password (min. 6 karakter)">
+      <input id="rPass" type="password" minlength="8" required class="inp" placeholder="Password (min. 8 karakter, huruf dan angka)">
       <p class="text-xs text-slate-400">Tautan verifikasi akan dikirim ke email. Setelah terverifikasi, akun menunggu persetujuan Admin.</p>
       <button class="w-full btn-main text-white py-2 rounded-lg text-sm font-medium">Daftar</button>
       <p class="text-xs text-center text-slate-400">Sudah punya akun? <a href="#" data-a="toLogin" class="text-emerald-400">Masuk</a></p>
@@ -130,9 +130,9 @@ const lvl=p=>p>=300?3:p>=200?2:p>=100?1:0;
 const TODAY=new Date().toLocaleDateString('sv-SE');
 const _m=new Date().getMonth()+1,_y=new Date().getFullYear(),TA=_m>=7?`${_y}/${_y+1}`:`${_y-1}/${_y}`;
 const dt=t=>new Date(t).toLocaleString('id-ID',{dateStyle:'short',timeStyle:'short'});
-const MENU={Admin:['dashboard','users','santri','alumni','peraturan','pelanggaran','sp','izin','absensi','rekap','logs'],Keamanan:['dashboard','santri','peraturan','pelanggaran','sp','izin','absensi','rekap'],Pengurus:['izin','absensi','rekap'],Pengasuh:['dashboard','santri','peraturan','pelanggaran','sp','izin'],'Wali Santri':['dashboard','pelanggaran','sp']};
+const MENU={Admin:['dashboard','users','santri','alumni','peraturan','pelanggaran','sp','izin','absensi','rekap','logs'],Keamanan:['dashboard','santri','peraturan','pelanggaran','sp','izin','absensi','rekap'],Pengurus:['dashboard','santri','alumni','peraturan','pelanggaran','sp','izin','absensi','rekap'],Pengasuh:['dashboard','santri','peraturan','pelanggaran','sp','izin'],'Wali Santri':['dashboard','pelanggaran','sp']};
 const LBL={dashboard:['chart-pie','Dashboard'],users:['user-shield','Pengguna'],santri:['users','Data Santri'],alumni:['user-graduate','Alumni'],peraturan:['gavel','Peraturan'],pelanggaran:['clipboard-list','Pelanggaran'],sp:['file-lines','Surat Peringatan'],izin:['right-left','Perizinan'],absensi:['qrcode','Absensi'],rekap:['calendar-check','Rekap Absensi'],logs:['history','Log Akses']};
-const ERR={'auth/invalid-credential':'Email atau password salah','auth/email-already-in-use':'Email sudah terdaftar','auth/weak-password':'Password minimal 6 karakter'};
+const ERR={'auth/invalid-credential':'Email atau password salah','auth/email-already-in-use':'Email sudah terdaftar','auth/weak-password':'Password terlalu lemah'};
 const toast=(t,i='success')=>Swal.fire({toast:true,position:'top',title:t,icon:i,timer:2200,showConfirmButton:false});
 const dlg=(title,html,pre,open)=>Swal.fire({title,html,showCancelButton:true,confirmButtonText:'Simpan',cancelButtonText:'Batal',focusConfirm:false,preConfirm:pre,didOpen:open});
 const opts=(a,f)=>a.map(f).join('');
@@ -141,7 +141,7 @@ const bar=(t,b='')=>`<div class="flex flex-wrap items-center justify-between gap
 const badge=p=>{const[l,c]=LV[lvl(p)];return `<span class="font-bold text-${c}-400">${p}<span class="text-slate-500 font-normal">/300</span></span> <span class="text-[10px] px-1.5 rounded border border-${c}-500/40 bg-${c}-500/20 text-${c}-400">${l}</span>`};
 const tbl=(h,b)=>`<div class="card overflow-x-auto"><table class="tb"><thead><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${b}</tbody></table></div>`;
 
-let U,view,unsubs=[],reg=false,qr,lastScan=0,ch=[],unAbs=null,sesiSig='';
+let U,view,unsubs=[],reg=false,qr,lastScan=0,ch=[],unAbs=null,sesiSig='',idleT=null;
 const S={spF:{lv:'',st:''},izin:[],sesi:[],sp:[],sesiId:'',rekap:[],bulan:TODAY.slice(0,7),users:[],santri:[],alumni:[],peraturan:[],pelanggaran:[],absensi:[],logs:[],q:''};
 const isStaff=()=>U.role==='Admin'||U.role==='Keamanan';
 
@@ -150,7 +150,7 @@ const show=id=>['auth','verify','pending','app'].forEach(s=>{const e=document.ge
 onAuthStateChanged(auth,u=>{if(reg)return;u?boot(u):(stop(),show('auth'))});
 $('#fLogin').onsubmit=async e=>{e.preventDefault();try{await signInWithEmailAndPassword(auth,val('lEmail'),$('#lPass').value)}catch(x){Swal.fire('Gagal',ERR[x.code]||x.message,'error')}};
 $('#rRole').onchange=e=>$('#rAnak').classList.toggle('hidden',e.target.value!=='Wali Santri');
-$('#fReg').onsubmit=async e=>{e.preventDefault();
+$('#fReg').onsubmit=async e=>{e.preventDefault();const pw=$('#rPass').value;if(pw.length<8||!/\d/.test(pw)||!/[A-Za-z]/.test(pw))return Swal.fire('Password terlalu lemah','Gunakan minimal 8 karakter dengan huruf dan angka.','warning');
   const wa=val('rWa').replace(/[\s-]/g,''),role=val('rRole'),kid=val('rKid').toUpperCase();
   if(!/^(\+62|62|0)8\d{8,12}$/.test(wa))return Swal.fire('Nomor tidak valid','Gunakan nomor WhatsApp, mis. 081234567890.','warning');
   if(role==='Wali Santri'&&!kid)return Swal.fire('Lengkapi data','Isi ID santri (anak) Anda.','warning');
@@ -171,9 +171,11 @@ async function boot(u){
   if(U.status!=='approved'){await Swal.fire('Akses ditolak','Akun tidak aktif. Hubungi Admin.','error');return signOut(auth)}
   $('#uname').textContent=U.name;$('#urole').textContent=U.role;
   $('#nav').innerHTML=MENU[U.role].map(m=>`<a class="nav" data-a="go" data-id="${m}"><i class="fas fa-${LBL[m][0]} w-5"></i>${LBL[m][1]}</a>`).join('');
-  show('app');listen();go(MENU[U.role][0]);log('Login');
+  show('app');listen();go(MENU[U.role][0]);log('Login');touch();
 }
-function stop(){unsubs.forEach(f=>f());unsubs=[];unAbs?.();unAbs=null;U=null}
+function stop(){unsubs.forEach(f=>f());unsubs=[];unAbs?.();unAbs=null;clearTimeout(idleT);U=null}
+const IDLE=15*60*1000,touch=()=>{clearTimeout(idleT);if(U)idleT=setTimeout(idleOut,IDLE)},idleOut=async()=>{if(!U)return;if(document.getElementById('scanfs')){touch();return}await log('Keluar otomatis (tidak aktif)');await signOut(auth);Swal.fire('Sesi berakhir','Anda keluar otomatis karena tidak ada aktivitas. Silakan masuk kembali.','info')};
+['click','keydown','touchstart','mousemove'].forEach(ev=>addEventListener(ev,touch,{passive:true}));
 const log=a=>U&&addDoc(collection(db,'logs'),{uid:U.uid,email:U.email,role:U.role,aksi:a,createdAt:Date.now()}).catch(()=>{});
 
 // ================= DATA (realtime, sesuai role) =================
@@ -185,13 +187,14 @@ function listen(){
     if(!U.childId)return;
     unsubs.push(onSnapshot(doc(db,'santri',U.childId),d=>{S.santri=d.exists()?[{id:d.id,...d.data()}]:[];paint()}));
     L('pelanggaran',query(c('pelanggaran'),where('santriId','==',U.childId)));L('sp',query(c('sp'),where('santriId','==',U.childId)));return}
-  L('santri',c('santri'));if(r==='Admin'||r==='Keamanan'||r==='Pengasuh')L('alumni',c('alumni'));
-  if(r!=='Pengurus')L('pelanggaran',query(c('pelanggaran'),orderBy('createdAt','desc'),limit(300)));
+  L('santri',c('santri'));L('alumni',c('alumni'));
+  L('pelanggaran',query(c('pelanggaran'),orderBy('createdAt','desc'),limit(300)));
   if(['Admin','Keamanan','Pengurus'].includes(r))unsubs.push(onSnapshot(query(c('sesi'),orderBy('createdAt','desc'),limit(30)),s=>{S.sesi=s.docs.map(d=>({id:d.id,...d.data()}));
-    if(!S.sesi.some(x=>x.id===S.sesiId)){S.sesiId=(S.sesi.find(x=>x.status==='Buka')||S.sesi[0])?.id||'';watchAbs()}
+    const cur=S.sesi.find(x=>x.id===S.sesiId),opn=S.sesi.find(x=>x.status==='Buka');
+    if(!cur||(cur.status!=='Buka'&&opn&&!document.getElementById('scanfs'))){S.sesiId=(opn||S.sesi[0])?.id||'';watchAbs()}
     const sg=S.sesi.map(x=>x.id+x.status).join(),f=sg!==sesiSig;sesiSig=sg;paint(f)},e=>console.error('sesi',e.code)));
   L('izin',query(c('izin'),where('tahunAjaran','==',TA)));
-  if(['Admin','Keamanan','Pengasuh'].includes(r))L('sp',c('sp'));
+  L('sp',c('sp'));
   if(r==='Admin'){L('users',c('users'));L('logs',query(c('logs'),orderBy('createdAt','desc'),limit(150)))}
 }
 
@@ -216,7 +219,7 @@ const V={
 dashboard(){
   if(U.role==='Wali Santri')return waliDash();
   const s=S.santri,c=[0,0,0,0];s.forEach(x=>c[lvl(x.poin||0)]++);
-  const pm=S.pelanggaran.filter(p=>new Date(p.createdAt).toLocaleDateString('sv-SE').startsWith(TODAY.slice(0,7))).length,hadir=S.absensi.filter(a=>a.status==='Hadir').length,ab=isStaff();
+  const pm=S.pelanggaran.filter(p=>new Date(p.createdAt).toLocaleDateString('sv-SE').startsWith(TODAY.slice(0,7))).length,hadir=S.absensi.filter(a=>a.status==='Hadir').length,ab=['Admin','Keamanan','Pengurus'].includes(U.role);
   const K=(i,l,v,k)=>`<div class="card p-4 flex items-center gap-3"><div class="w-11 h-11 shrink-0 rounded-xl bg-${k}-500/15 text-${k}-400 flex items-center justify-center text-lg"><i class="fas fa-${i}"></i></div><div class="min-w-0"><p class="text-xs text-slate-400 truncate">${l}</p><p class="text-2xl font-bold text-white leading-tight">${v}</p></div></div>`;
   const rec=S.pelanggaran.slice().sort((a,b)=>b.createdAt-a.createdAt).slice(0,5);
   return `<div class="grid grid-cols-2 xl:grid-cols-4 gap-3">${K('users','Santri Aktif',s.length,'emerald')}${K('user-graduate','Santri Lulus / Nonaktif',S.alumni.length,'violet')}${K('id-card','Kartu Santri Aktif',s.length,'sky')}${K('id-card-clip','Kartu Santri Nonaktif',S.alumni.length,'slate')}${K('clipboard-list','Total Pelanggaran',S.totalPel??S.pelanggaran.length,'orange')}${K('calendar-day','Pelanggaran Bulan Ini',pm,'yellow')}${K('circle-check','Hadir (Sesi Dipilih)',ab?hadir:'-','emerald')}${K('shield-halved','Santri Aman',c[0],'emerald')}${K('hourglass-half','Sesi Belum Ditutup',ab?S.sesi.filter(x=>x.status==='Buka'&&x.tanggal<TODAY).length:'-','orange')}${K('house-user','Izin Pulang (di luar)',S.izin.filter(i=>!i.kembaliAt&&i.jenis==='pulang').length,'sky')}${K('person-walking-arrow-right','Izin Keluar/Kegiatan (di luar)',S.izin.filter(i=>!i.kembaliAt&&i.jenis!=='pulang').length,'violet')}${K('clock','Terlambat Kembali',S.izin.filter(i=>!i.kembaliAt&&Date.now()>i.sampai).length,'red')}${K('file-signature','SP Menunggu Terbit',S.sp.filter(x=>x.status==='draf').length,'yellow')}</div>
@@ -250,9 +253,9 @@ pelanggaran(){
     return `<tr><td>${dt(p.kejadian||p.createdAt)}</td><td>${esc(p.nama)}<p class="text-[10px] text-slate-500">${esc(p.santriId)}</p></td><td class="whitespace-normal min-w-[200px]">${esc(p.pasal)} ${p.kategori?`<span class="text-[10px] px-1.5 rounded border border-${k}-500/40 text-${k}-400">${esc(p.kategori)}</span>`:''}<p class="text-xs text-slate-400">${p.tempat?'Lokasi: '+esc(p.tempat)+'. ':''}${esc(p.catatan||'')} <span class="text-slate-500">Dicatat: ${esc(p.oleh||'-')}</span></p></td><td class="text-red-400 font-bold">+${p.poin}</td><td>${st?`<select class="inp !w-auto !py-1" data-st="${esc(p.id)}">${opts(ST,x=>`<option ${x===(p.status||'Dicatat')?'selected':''}>${x}</option>`)}</select>`:esc(p.status||'Dicatat')}</td><td class="text-right">${st&&s&&s.poin>=100?`<button class="btn" data-a="go" data-id="sp"><i class="fas fa-file-pdf"></i> SP${lvl(s.poin)}</button>`:''}${ad?` <button class="btn" data-a="delV" data-id="${esc(p.id)}"><i class="fas fa-trash text-red-400"></i></button>`:''}</td></tr>`},6))},
 absensi(){
   const se=S.sesi.find(x=>x.id===S.sesiId),op=se?.status==='Buka';
-  return bar('Sesi Absensi',`<select id="ssel" class="inp !w-auto !py-1.5">${opts(S.sesi,x=>`<option value="${esc(x.id)}" ${x.id===S.sesiId?'selected':''}>${esc(x.nama)} - ${esc(x.tanggal)} ${esc(x.jam)} (${esc(x.status)})</option>`)||'<option>Belum ada sesi</option>'}</select><button class="btn bg-blue-600" data-a="newSesi">+ Buka Sesi</button>${op?'<button class="btn text-red-400" data-a="tutupSesi">Tutup Sesi</button>':''}`)+
+  return bar('Sesi Absensi',`<select id="ssel" class="inp !w-auto !py-1.5">${opts(S.sesi,x=>`<option value="${esc(x.id)}" ${x.id===S.sesiId?'selected':''}>${esc(x.nama)} - ${esc(x.tanggal)} ${esc(x.jam)} (${esc(x.status)})</option>`)||'<option>Belum ada sesi</option>'}</select><button class="btn bg-blue-600" data-a="newSesi">+ Buka Sesi</button>${op&&isStaff()?'<button class="btn text-red-400" data-a="tutupSesi">Tutup Sesi</button>':''}`)+
   `<div class="grid md:grid-cols-5 gap-4"><div class="card p-4 space-y-3 md:col-span-2"><button class="w-full btn-main text-white py-2.5 rounded-lg text-sm font-medium" data-a="scanFull"><i class="fas fa-expand"></i> Scan Layar Penuh</button><div id="reader" class="bg-black rounded-lg overflow-hidden"></div><div class="flex gap-2"><button class="btn flex-1" data-a="scanStart">Mulai Kamera</button><button class="btn flex-1" data-a="scanStop">Stop</button></div><div class="flex gap-2"><input id="mid" class="inp" placeholder="ID santri / scan kartu"><button class="btn" data-a="manual"><i class="fas fa-check"></i></button></div><p class="text-[11px] text-slate-400">${se?(op?'Sesi terbuka: scan kartu atau ketik ID, foto santri muncul.':'Sesi sudah ditutup.'):'Buka sesi terlebih dahulu.'}</p></div>
-  <div class="card p-4 md:col-span-3"><p id="abs-sum" class="text-xs text-slate-400 mb-2">${absSum()}</p><div class="overflow-auto max-h-[420px]"><table class="tb"><thead><tr><th>Jam</th><th>Santri</th><th>Status</th><th></th></tr></thead><tbody id="abs">${absRows()}</tbody></table></div></div></div>`},
+  <div class="card p-4 md:col-span-3"><p id="abs-sum" class="text-xs text-slate-400 mb-2">${absSum()}</p><div class="overflow-auto max-h-[420px]"><table class="tb"><thead><tr><th>Jam</th><th>Santri</th><th>Status</th><th>Petugas</th><th></th></tr></thead><tbody id="abs">${absRows()}</tbody></table></div></div></div>`},
 izin(){const can=['Admin','Keamanan','Pengurus'].includes(U.role);
   return bar('Perizinan Santri - TA '+TA,'<button class="btn" data-a="expI"><i class="fas fa-file-export"></i> Export</button>'+(can?'<button class="btn bg-blue-600" data-a="newI">+ Catat Izin</button>':''))+`<div id="izc" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">${izinCards()}</div>`+(can?`<div class="card p-4 mb-4 grid md:grid-cols-5 gap-4"><div class="space-y-3 md:col-span-2"><button class="w-full btn-main text-white py-2.5 rounded-lg text-sm font-medium" data-a="scanFull"><i class="fas fa-expand"></i> Scan Layar Penuh</button><div id="reader" class="bg-black rounded-lg overflow-hidden"></div><div class="flex gap-2"><button class="btn flex-1" data-a="scanStart">Mulai Kamera</button><button class="btn flex-1" data-a="scanStop">Stop</button></div><div class="flex gap-2"><input id="mid" class="inp" placeholder="ID santri / scan kartu"><button class="btn" data-a="manual"><i class="fas fa-check"></i></button></div></div><p class="md:col-span-3 text-xs text-slate-400">Scan kartu atau ketik ID. Jika santri tercatat sedang di luar, sistem mencatat KEMBALI; jika tidak, formulir izin terbuka. Kuota: pulang 5x per tahun ajaran, kegiatan 2x per bulan (wajib surat izin resmi lembaga). Izin keluar dibatasi sesuai batas kembali yang dicatat.</p></div>`:'')+`<div class="card overflow-x-auto"><table class="tb"><thead><tr><th>Santri</th><th>Jenis</th><th>Pergi</th><th>Batas kembali</th><th>Kembali</th><th>Status</th><th></th></tr></thead><tbody id="izt">${izinRows()}</tbody></table></div>`},
 sp(){
@@ -269,28 +272,28 @@ logs(){return bar('Log Aktivitas')+tbl(['Waktu','Pengguna','Peran','Aktivitas'],
 const santriRows=()=>{const q=S.q.toLowerCase(),st=isStaff(),ad=U.role==='Admin';
   return rows(S.santri.filter(s=>s.nama.toLowerCase().includes(q)||s.id.toLowerCase().includes(q)),s=>`<tr><td><p class="text-white">${esc(s.nama)}</p><p class="text-[10px] text-slate-400">${esc(s.id)}</p></td><td>${esc(s.kelas)} / ${esc(s.kamar)}</td><td>${badge(s.poin||0)}</td><td class="text-right">${st?`<button class="btn" data-a="editS" data-id="${esc(s.id)}"><i class="fas fa-pen"></i></button> <button class="btn" data-a="card" data-id="${esc(s.id)}"><i class="fas fa-id-card"></i></button>`:''}${st?` <button class="btn" data-a="delS" data-id="${esc(s.id)}" title="Hapus santri"><i class="fas fa-trash text-red-400"></i></button>`:''}${ad?` <button class="btn" data-a="grad" data-id="${esc(s.id)}"><i class="fas fa-user-graduate text-emerald-400"></i></button>`:''}</td></tr>`,4)};
 const jenisL={pulang:'Izin Pulang',kegiatan:'Izin Kegiatan',keluar:'Izin Keluar'},nowLocal=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,16);
-const absRows=()=>rows(S.absensi.slice().sort((a,b)=>b.createdAt-a.createdAt),a=>`<tr><td>${esc(a.jam)}</td><td>${esc(a.nama)} <span class="text-xs text-slate-500">${esc(a.kode)}</span></td><td class="${a.status==='Hadir'?'text-emerald-400':a.status==='Alpa'?'text-red-400':'text-yellow-400'}">${esc(a.status)}${a.koreksi?` <span class="text-[10px] text-slate-500" title="${esc(a.koreksi)}">(dikoreksi)</span>`:''}</td><td class="text-right">${U.role==='Admin'?`<button class="btn" data-a="korAbs" data-id="${esc(a.id)}"><i class="fas fa-pen"></i></button>`:''}</td></tr>`,4);
-const absSum=()=>{const n=k=>S.absensi.filter(a=>a.status===k).length,iz=S.absensi.filter(a=>String(a.status).startsWith('Izin')).length;return `Hadir ${n('Hadir')} | Izin ${iz} | Sakit ${n('Sakit')} | Alpa ${n('Alpa')} | Belum tercatat ${Math.max(0,S.santri.length-S.absensi.length)}`};
+const absRows=()=>rows(S.absensi.slice().sort((a,b)=>b.createdAt-a.createdAt),a=>`<tr><td>${esc(a.jam)}</td><td>${esc(a.nama)} <span class="text-xs text-slate-500">${esc(a.kode)}</span></td><td class="${a.status==='Hadir'?'text-emerald-400':a.status==='Alpa'?'text-red-400':'text-yellow-400'}">${esc(a.status)}${a.koreksi?` <span class="text-[10px] text-slate-500" title="${esc(a.koreksi)}">(dikoreksi)</span>`:''}</td><td class="text-xs text-slate-400">${esc(a.otomatis?'Sistem':(a.oleh||'-'))}</td><td class="text-right">${U.role==='Admin'?`<button class="btn" data-a="korAbs" data-id="${esc(a.id)}"><i class="fas fa-pen"></i></button>`:''}</td></tr>`,5);
+const absSum=()=>{const n=k=>S.absensi.filter(a=>a.status===k).length,iz=S.absensi.filter(a=>String(a.status).startsWith('Izin')).length,by={};S.absensi.filter(a=>!a.otomatis&&a.oleh).forEach(a=>{by[a.oleh]=(by[a.oleh]||0)+1});const pt=Object.entries(by).map(([k,v])=>`${k} ${v}`).join(', ');return `Hadir ${n('Hadir')} | Izin ${iz} | Sakit ${n('Sakit')} | Alpa ${n('Alpa')} | Belum tercatat ${Math.max(0,S.santri.length-S.absensi.length)}${pt?` | Petugas: ${pt}`:''}`};
 const izinStat=i=>i.kembaliAt?'Selesai':Date.now()>i.sampai?'Terlambat':'Di luar';
 const izinCards=()=>{const out=S.izin.filter(i=>!i.kembaliAt),K=(l,v,k)=>`<div class="card p-4"><p class="text-xs text-slate-400">${l}</p><p class="text-2xl font-bold text-${k}-400">${v}</p></div>`;
   return K('Sedang di luar',out.length,'sky')+K('Terlambat kembali',out.filter(i=>Date.now()>i.sampai).length,'red')+K('Izin pulang TA ini',S.izin.filter(i=>i.jenis==='pulang').length,'emerald')+K('Total izin TA ini',S.izin.length,'violet')};
 const izinRows=()=>{const can=['Admin','Keamanan','Pengurus'].includes(U.role),CL={Selesai:'emerald',Terlambat:'red','Di luar':'sky'};
   return rows(S.izin.slice().sort((a,b)=>(a.kembaliAt?1:0)-(b.kembaliAt?1:0)||b.mulai-a.mulai),i=>{const st=izinStat(i),c=CL[st];
     return `<tr><td>${esc(i.nama)}<p class="text-[10px] text-slate-500">${esc(i.santriId)}</p></td><td>${jenisL[i.jenis]}<p class="text-xs text-slate-400 whitespace-normal max-w-[220px]">${esc(i.kegiatan||i.alasan||'')}${i.lembaga?`<br>${esc(i.lembaga)} - No. ${esc(i.noSurat||'-')}`:''}</p></td><td>${dt(i.mulai)}</td><td>${dt(i.sampai)}</td><td>${i.kembaliAt?dt(i.kembaliAt):'-'}</td><td><span class="text-xs px-2 py-0.5 rounded-full border border-${c}-500/40 text-${c}-400">${st}</span></td><td class="text-right">${i.adaSurat?`<button class="btn" data-a="lihatDok" data-id="izin_${esc(i.id)}">Surat</button> `:''}${!i.kembaliAt&&can?`<button class="btn text-emerald-400" data-a="kembali" data-id="${esc(i.id)}">Catat kembali</button>`:''}</td></tr>`},7)};
-async function izinScan(kode){const s=S.santri.find(x=>x.id===kode);if(!s)return toast('ID tidak terdaftar','error');
+async function izinScan(kode){touch();const s=S.santri.find(x=>x.id===kode);if(!s)return toast('ID tidak terdaftar','error');
   const a=S.izin.find(i=>i.santriId===kode&&!i.kembaliAt);
   if(a){const ph=await foto(kode),r=await Swal.fire({title:s.nama,text:`Tercatat di luar (${jenisL[a.jenis]}). Catat KEMBALI sekarang?`,imageUrl:ph||undefined,imageWidth:140,showCancelButton:true,confirmButtonText:'Catat kembali',cancelButtonText:'Batal'});if(r.isConfirmed)A.kembali({id:a.id});return}
   A.newI({kode})}
 function watchAbs(){unAbs?.();unAbs=null;if(!S.sesiId){S.absensi=[];return}unAbs=onSnapshot(query(collection(db,'absensi'),where('sesiId','==',S.sesiId)),s=>{S.absensi=s.docs.map(d=>({id:d.id,...d.data()}));paint()},e=>console.error('absensi',e.code))}
 let qrFS=null,fsTimer=null,resT=null,ac=null;
 const beep=ok=>{try{ac??=new(window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=ok?880:260;g.gain.value=.15;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+(ok?.12:.3))}catch{}};
-async function absenCore(kode){
+async function absenCore(kode){touch();
   const se=S.sesi.find(x=>x.id===S.sesiId);if(!se||se.status!=='Buka')return {t:'err',m:'Buka atau pilih sesi yang masih terbuka'};
   const s=S.santri.find(x=>x.id===kode);if(!s)return {t:'err',m:'ID '+kode+' tidak terdaftar'};
   const ph=await foto(kode);if(S.absensi.some(a=>a.kode===kode))return {t:'dup',s,ph,m:'Sudah tercatat'};
   const iz=S.izin.find(i=>i.santriId===kode&&!i.kembaliAt);
-  try{await setDoc(doc(db,'absensi',S.sesiId+'_'+kode),{kode,nama:s.nama,status:'Hadir',tanggal:se.tanggal,sesiId:S.sesiId,jam:new Date().toTimeString().slice(0,5),createdAt:Date.now()});return {t:'ok',s,ph,iz,m:'HADIR'}}
-  catch{return {t:'err',m:'Gagal mencatat absensi'}}}
+  try{await setDoc(doc(db,'absensi',S.sesiId+'_'+kode),{kode,nama:s.nama,status:'Hadir',tanggal:se.tanggal,sesiId:S.sesiId,jam:new Date().toTimeString().slice(0,5),oleh:U.name,createdAt:Date.now()});return {t:'ok',s,ph,iz,m:'HADIR'}}
+  catch(e){return e.code==='permission-denied'?{t:'dup',s,ph,m:'Sudah dicatat petugas lain atau sesi ditutup'}:{t:'err',m:'Gagal mencatat absensi'}}}
 async function absen(kode){const r=await absenCore(kode);
   if(r.t==='ok')Swal.fire({imageUrl:r.ph||undefined,imageWidth:180,title:r.s.nama,html:`<b>${esc(r.s.kelas)} / ${esc(r.s.kamar)}</b><br>HADIR${r.iz?`<br><span style="color:#facc15">Catatan: tercatat ${jenisL[r.iz.jenis]} dan belum kembali</span>`:''}`,timer:r.iz?3500:1800,showConfirmButton:false});
   else toast(r.s?`${r.s.nama}: ${r.m}`:r.m,r.t==='dup'?'info':'error')}
@@ -472,12 +475,12 @@ async delV({id}){const v=S.pelanggaran.find(x=>x.id===id);
 async newSesi(){dlg('Buka Sesi Absensi',`<div class="space-y-2 text-left"><input id="f1" class="inp" placeholder="Nama kegiatan, mis. Jamaah Subuh"><label class="block text-left text-[11px] text-slate-400">Tanggal<input id="f2" type="date" class="inp mt-0.5" value="${TODAY}"></label><label class="block text-left text-[11px] text-slate-400">Jam<input id="f3" type="time" class="inp mt-0.5" value="${new Date().toTimeString().slice(0,5)}"></label></div>`,async()=>{
   const n=val('f1');if(!n)return Swal.showValidationMessage('Nama kegiatan wajib diisi');
   const x=await addDoc(collection(db,'sesi'),{nama:n,tanggal:val('f2')||TODAY,jam:val('f3'),status:'Buka',dibuatOleh:U.name,createdAt:Date.now()});S.sesiId=x.id;watchAbs();paint(true);log('Buka sesi: '+n);toast('Sesi dibuka')})},
-async tutupSesi(){const se=S.sesi.find(x=>x.id===S.sesiId);if(!se)return;
+async tutupSesi(){if(!isStaff())return;const se=S.sesi.find(x=>x.id===S.sesiId);if(!se)return;
   const done=new Set(S.absensi.map(a=>a.kode)),ts=new Date(se.tanggal+'T'+se.jam).getTime(),izOf=k=>S.izin.find(i=>i.santriId===k&&i.mulai<=ts&&(!i.kembaliAt||ts<=i.kembaliAt));
   const miss=S.santri.filter(s=>!done.has(s.id)),auto=miss.filter(s=>izOf(s.id)),rest=miss.filter(s=>!izOf(s.id));
   const R=await Swal.fire({title:'Tutup sesi?',width:600,showCancelButton:true,confirmButtonText:'Tutup sesi',cancelButtonText:'Batal',html:`<p class="text-sm">${done.size} hadir, ${auto.length} izin otomatis, ${rest.length} belum hadir.</p><p class="text-xs text-slate-400 mt-1">Centang yang SAKIT. Yang tidak dicentang dicatat ALPA.</p><div class="text-left max-h-64 overflow-auto mt-2">${rest.map(s=>`<label class="flex items-center gap-2 py-1 text-sm"><input type="checkbox" class="sk" value="${esc(s.id)}"> ${esc(s.nama)} <span class="text-xs text-slate-500">${esc(s.kelas)}</span></label>`).join('')||'<p class="text-xs text-slate-400">Semua santri sudah tercatat.</p>'}</div>`,preConfirm:()=>[...document.querySelectorAll('.sk:checked')].map(x=>x.value)});
   if(!R.isConfirmed)return;
-  const sakit=new Set(R.value),jam=new Date().toTimeString().slice(0,5),ops=miss.map(s=>{const iz=izOf(s.id);return [doc(db,'absensi',se.id+'_'+s.id),{kode:s.id,nama:s.nama,status:iz?jenisL[iz.jenis]:sakit.has(s.id)?'Sakit':'Alpa',tanggal:se.tanggal,sesiId:se.id,jam,otomatis:true,createdAt:Date.now()}]});
+  const sakit=new Set(R.value),jam=new Date().toTimeString().slice(0,5),ops=miss.map(s=>{const iz=izOf(s.id);return [doc(db,'absensi',se.id+'_'+s.id),{kode:s.id,nama:s.nama,status:iz?jenisL[iz.jenis]:sakit.has(s.id)?'Sakit':'Alpa',tanggal:se.tanggal,sesiId:se.id,jam,otomatis:true,oleh:U.name,createdAt:Date.now()}]});
   for(let i=0;i<ops.length;i+=400){const b=writeBatch(db);ops.slice(i,i+400).forEach(([ref,d])=>b.set(ref,d));await b.commit()}
   await updateDoc(doc(db,'sesi',se.id),{status:'Tutup',ditutupAt:Date.now(),ditutupOleh:U.name});log(`Tutup sesi ${se.nama}: ${sakit.size} sakit, ${rest.length-sakit.size} alpa, ${auto.length} izin`);toast('Sesi ditutup')},
 newI(d={}){const k=d.kode||'',L=(l,h)=>`<label class="block text-left text-[11px] text-slate-400">${l}${h}</label>`;
@@ -590,3 +593,4 @@ $('#xl').onchange=async e=>{
 </script>
 </body>
 </html>
+
